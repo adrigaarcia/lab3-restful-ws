@@ -34,6 +34,7 @@ class AddressBookServiceTest {
         val response = restTemplate.getForEntity("http://localhost:$port/contacts", Array<Person>::class.java)
         assertEquals(200, response.statusCode.value())
         assertEquals(0, response.body?.size)
+        assertEquals(0, addressBook.personList.size)
 
         //////////////////////////////////////////////////////////////////////
         // Verify that GET /contacts is well implemented by the service, i.e
@@ -73,6 +74,17 @@ class AddressBookServiceTest {
         // Verify that POST /contacts is well implemented by the service, i.e
         // complete the test to ensure that it is not safe and not idempotent
         //////////////////////////////////////////////////////////////////////
+
+        // First, for the safety check, we check if addressBook contains Juan, having being moved from a clean state.
+        assertEquals(addressBook.personList.filter { person->person.name=="Juan" }.size,1)
+        assertEquals(addressBook.personList.size,1)
+        
+        //Next we try to add another Juan, to check it is not idempotent.
+        response = restTemplate.postForEntity("http://localhost:$port/contacts", juan, Person::class.java)
+        assertEquals(addressBook.personList.filter { person->person.name=="Juan" }.size,2)
+        assertEquals(addressBook.personList.size,2)
+        assertEquals(addressBook.nextId,3)
+
     }
 
     @Test
@@ -117,6 +129,18 @@ class AddressBookServiceTest {
         // Verify that GET /contacts/person/3 is well implemented by the service, i.e
         // complete the test to ensure that it is safe and idempotent
         //////////////////////////////////////////////////////////////////////
+
+        // To check these two properties, we need to compare states before and after execution.
+        var abplCheck = addressBook.personList.toMutableList()
+
+        // Responses must be equal
+        var responseCheck = restTemplate.getForEntity(mariaURI, Person::class.java)
+        assertEquals(response,responseCheck)
+        assertEquals(200, responseCheck.statusCode.value())
+        assertEquals(MediaType.APPLICATION_JSON, responseCheck.headers.contentType)
+
+        // State must be equal
+        assertEquals(abplCheck, addressBook.personList)
     }
 
     @Test
@@ -139,6 +163,10 @@ class AddressBookServiceTest {
         // Verify that GET /contacts is well implemented by the service, i.e
         // complete the test to ensure that it is safe and idempotent
         //////////////////////////////////////////////////////////////////////
+
+        // Same as previous test, we compare states before and after execution
+        var abplCheck = addressBook.personList.toMutableList()
+        assertEquals(abplCheck, addressBook.personList)
     }
 
     @Test
@@ -178,6 +206,14 @@ class AddressBookServiceTest {
         // Verify that PUT /contacts/person/2 is well implemented by the service, i.e
         // complete the test to ensure that it is idempotent but not safe
         //////////////////////////////////////////////////////////////////////
+
+        // For the safety check, there has to be a Maria in the address Book 
+        assertEquals(addressBook.personList.filter{ person -> person.name == "Maria"}.size, 1)
+
+        // To check isn't idempotent, the same update function must be executed, and only one
+        // Maria must be registered in the addressBook.
+        restTemplate.exchange(juanURI, HttpMethod.PUT, HttpEntity(maria), Person::class.java)
+        assertEquals(addressBook.personList.filter{ person -> person.name == "Maria"}.size, 1)
     }
 
     @Test
@@ -189,8 +225,14 @@ class AddressBookServiceTest {
         addressBook.personList.add(salvador)
         addressBook.personList.add(juan)
 
+        // Number of people in the addressBook before deletion
+        val fullList = addressBook.personList.size
+
         // Delete a user
         restTemplate.execute(juanURI, HttpMethod.DELETE, {}, { assertEquals(204, it.statusCode.value()) })
+        
+        // Number of people in the addressBook after deletion
+        val deletedList = addressBook.personList.size
 
         // Verify that the user has been deleted
         restTemplate.execute(juanURI, HttpMethod.GET, {}, { assertEquals(404, it.statusCode.value()) })
@@ -199,6 +241,14 @@ class AddressBookServiceTest {
         // Verify that DELETE /contacts/person/2 is well implemented by the service, i.e
         // complete the test to ensure that it is idempotent but not safe
         //////////////////////////////////////////////////////////////////////
+
+        // The safety test checks that the numbers we got earlier are not equal
+        assertNotEquals(fullList, deletedList)
+
+        // When the function is reexecuted, it must return the same status code
+        // And Juan must not be present in the addressBook
+        restTemplate.execute(juanURI, HttpMethod.DELETE, {}, { assertEquals(204, it.statusCode.value()) })
+        assertEquals(addressBook.personList.count { person -> person.name == "Juan" }, 0)
     }
 
     @Test
